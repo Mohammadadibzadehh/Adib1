@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: adib-server
+    env: docker
+    plan: free
+    envVars:
+      - key: GOLESTAN_URL
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: CHECK_INTERVAL_MINUTES
+        value: "30"
+      - key: PORT
+        value: "3000"
