@@ -40,8 +40,8 @@
         <div class="cd"><div class="num" id="cdMain">--</div><div class="lbl" id="cdMainLbl">روز</div></div>
         <div class="cd"><div class="num" id="cdSub">--</div><div class="lbl" id="cdSubLbl">تا اولین امتحان</div></div>
       </div>
-      <label>تاریخ شروع بازه امتحانات</label>
-      <input type="date" id="examPeriodStart">
+      <label>تاریخ شروع بازه امتحانات (شمسی)</label>
+      <div id="examPeriodPicker"></div>
       <button class="btn secondary" id="saveSettings">ذخیره تاریخ</button>
     </div>
 
@@ -65,14 +65,14 @@
         <div><label>نام درس</label><input id="cName" placeholder="مثلاً مدار منطقی"></div>
         <div><label>تعداد واحد</label><input id="cCredit" type="number" min="1" max="4" placeholder="3"></div>
       </div>
-      <label>روز(های) کلاس<small style="display:inline;color:var(--muted);">— اگه درس دو روز در هفته‌ست، هر دو روز رو انتخاب کن</small></label>
-      <div class="chip-row" id="cDaysChips"></div>
-      <div class="grid2">
-        <div><label>ساعت (مثلاً 10-12)</label><input id="cTime" placeholder="10-12"></div>
+      <label>جلسات کلاس<small style="display:inline;color:var(--muted);">— اگه درس دو روزه‌ست و ساعتش فرق داره (مثلاً دوشنبه ۱۵ و سه‌شنبه ۱۶)، یه جلسه دیگه اضافه کن</small></label>
+      <div id="cSessionsList"></div>
+      <button class="btn small secondary" type="button" id="addSessionRow">+ افزودن جلسه دیگر</button>
+      <div class="grid2" style="margin-top:10px;">
         <div><label>ترم (اختیاری)</label><input id="cTerm" placeholder="مثلاً ترم ۲ - ۱۴۰۴"></div>
       </div>
-      <label>تاریخ و ساعت امتحان</label>
-      <input id="cExam" type="datetime-local">
+      <label>تاریخ و ساعت امتحان (شمسی)</label>
+      <div id="cExamPicker"></div>
       <button class="btn block" id="addCourse">افزودن درس</button>
       <div id="conflictWarning"></div>
     </div>
@@ -140,7 +140,7 @@
             <option value="سایر">سایر</option>
           </select>
         </div>
-        <div><label>تاریخ</label><input id="calDate" type="date"></div>
+        <div><label>تاریخ (شمسی)</label><div id="calDatePicker"></div></div>
       </div>
       <label>عنوان (اختیاری)</label>
       <input id="calTitle" placeholder="مثلاً روز اول حذف و اضافه">
@@ -158,13 +158,10 @@
       <h2>یادآور تکلیف و پروژه</h2>
       <label>عنوان تکلیف</label>
       <input id="taskTitle" placeholder="مثلاً تمرین سری سوم">
-      <div class="grid2">
-        <div>
-          <label>درس مرتبط (اختیاری)</label>
-          <select id="taskCourse"><option value="">— بدون درس —</option></select>
-        </div>
-        <div><label>ددلاین</label><input id="taskDeadline" type="datetime-local"></div>
-      </div>
+      <label>درس مرتبط (اختیاری)</label>
+      <select id="taskCourse"><option value="">— بدون درس —</option></select>
+      <label>ددلاین (شمسی)</label>
+      <div id="taskDeadlinePicker"></div>
       <label>یادداشت (اختیاری)</label>
       <textarea id="taskNotes" placeholder="جزئیات بیشتر..."></textarea>
       <button class="btn block" id="addTask">افزودن تکلیف</button>
