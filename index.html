@@ -13,10 +13,10 @@
 
   <header class="top">
     <div class="brand">
-      <div class="mark">اد</div>
+      <div class="mark" id="avatarMark">اد</div>
       <div>
-        <h1>ادیب</h1>
-        <span>دستیار دانشجویی گلستان</span>
+        <h1 id="greetingLine">ادیب</h1>
+        <span id="greetingSub">دستیار دانشجویی گلستان</span>
       </div>
     </div>
   </header>
@@ -29,6 +29,7 @@
     <button data-view="tasks">تکالیف</button>
     <button data-view="notes">جزوات</button>
     <button data-view="reports">گزارش‌های گلستان</button>
+    <button data-view="profile">پروفایل</button>
   </nav>
 
   <!-- DASHBOARD -->
@@ -64,20 +65,14 @@
         <div><label>نام درس</label><input id="cName" placeholder="مثلاً مدار منطقی"></div>
         <div><label>تعداد واحد</label><input id="cCredit" type="number" min="1" max="4" placeholder="3"></div>
       </div>
+      <label>روز(های) کلاس<small style="display:inline;color:var(--muted);">— اگه درس دو روز در هفته‌ست، هر دو روز رو انتخاب کن</small></label>
+      <div class="chip-row" id="cDaysChips"></div>
       <div class="grid2">
-        <div>
-          <label>روز کلاس</label>
-          <select id="cDay">
-            <option>شنبه</option><option>یکشنبه</option><option>دوشنبه</option>
-            <option>سه‌شنبه</option><option>چهارشنبه</option><option>پنجشنبه</option>
-          </select>
-        </div>
         <div><label>ساعت (مثلاً 10-12)</label><input id="cTime" placeholder="10-12"></div>
-      </div>
-      <div class="grid2">
         <div><label>ترم (اختیاری)</label><input id="cTerm" placeholder="مثلاً ترم ۲ - ۱۴۰۴"></div>
-        <div><label>تاریخ و ساعت امتحان</label><input id="cExam" type="datetime-local"></div>
       </div>
+      <label>تاریخ و ساعت امتحان</label>
+      <input id="cExam" type="datetime-local">
       <button class="btn block" id="addCourse">افزودن درس</button>
       <div id="conflictWarning"></div>
     </div>
@@ -211,6 +206,27 @@
     <div class="card">
       <h2>گزارش‌های موردنظر برای اتصال</h2>
       <div class="report-grid" id="reportGrid"></div>
+    </div>
+  </section>
+
+  <!-- PROFILE -->
+  <section class="view" id="profile">
+    <div class="card">
+      <h2>پروفایل</h2>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
+        <img id="profilePhotoPreview" src="" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;display:none;border:2px solid var(--gold);">
+        <div id="profilePhotoPlaceholder" style="width:64px;height:64px;border-radius:50%;background:var(--panel-2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;">بدون عکس</div>
+        <div style="flex:1;">
+          <label style="margin-top:0;">عکس پروفایل</label>
+          <input type="file" id="profilePhotoInput" accept="image/*">
+        </div>
+      </div>
+      <label>نام و نام خانوادگی</label>
+      <input id="profileName" placeholder="مثلاً محمد ادیب‌زاده">
+      <label>رشته تحصیلی</label>
+      <input id="profileMajor" placeholder="مثلاً مهندسی کامپیوتر">
+      <button class="btn block" id="saveProfile">ذخیره پروفایل</button>
+      <div id="profileSavedMsg"></div>
     </div>
   </section>
 

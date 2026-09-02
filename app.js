@@ -22,7 +22,10 @@ let settings = { examPeriodStart: null };
 let calEvents = [];
 let tasks = [];
 let notes = [];
+let profile = { name: '', major: '', photo: '' };
 let dayPref = new Set();
+let cDaysSelected = new Set();          // روزهای انتخاب‌شده در فرم افزودن درس
+let optionDraftDays = {};               // روزهای انتخاب‌شده در فرم «افزودن گزینه» هر درس (keyed by course id)
 
 function toFaDigits(n){
   const fa = ["۰","۱","۲","۳","۴","۵","۶","۷","۸","۹"];
@@ -39,6 +42,7 @@ function parseTime(str){
   return { start: parseFloat(nums[0]), end: parseFloat(nums[1]) };
 }
 function overlap(s1,e1,s2,e2){ return s1 < e2 && s2 < e1; }
+function daysLabel(days){ return (days && days.length) ? days.join('، ') : '—'; }
 
 // ---------- persistence (browser localStorage — data stays on this device) ----------
 function loadKey(key, fallback){
@@ -51,16 +55,28 @@ async function loadAll(){
   calEvents = loadKey('adib:calendar', []);
   tasks = loadKey('adib:tasks', []);
   notes = loadKey('adib:notes', []);
-  // migrate legacy course shape (day/time at top level) to options[]
+  profile = loadKey('adib:profile', { name:'', major:'', photo:'' });
+
+  // migrate legacy course/option shape (single day:string) to days:[...]
   courses.forEach(c=>{
     if(!c.options){
-      c.options = [{ day: c.day || DAYS[0], time: c.time || '' }];
+      c.options = [{ days: [c.day || DAYS[0]], time: c.time || '' }];
       c.chosen = 0;
     }
+    c.options.forEach(o=>{
+      if(!o.days){ o.days = o.day ? [o.day] : [DAYS[0]]; }
+      delete o.day;
+    });
     if(c.chosen===undefined) c.chosen = 0;
   });
+
   if(settings.examPeriodStart) document.getElementById('examPeriodStart').value = settings.examPeriodStart;
+  document.getElementById('profileName').value = profile.name || '';
+  document.getElementById('profileMajor').value = profile.major || '';
+  if(profile.photo) setPhotoPreview(profile.photo);
+
   renderAll();
+  renderGreeting();
 }
 async function save(key, data){ try{ localStorage.setItem(key, JSON.stringify(data)); }catch(e){ console.error(e); } }
 const saveCourses = ()=>save('adib:courses', courses);
@@ -68,6 +84,7 @@ const saveSettings = ()=>save('adib:settings', settings);
 const saveCal = ()=>save('adib:calendar', calEvents);
 const saveTasks = ()=>save('adib:tasks', tasks);
 const saveNotes = ()=>save('adib:notes', notes);
+const saveProfile = ()=>save('adib:profile', profile);
 
 // ---------- tabs ----------
 document.querySelectorAll('nav.tabs button').forEach(btn=>{
@@ -86,40 +103,106 @@ document.getElementById('saveSettings').addEventListener('click', async ()=>{
   renderCountdown();
 });
 
+// ---------- greeting ----------
+function renderGreeting(){
+  const hour = new Date().getHours();
+  let greeting;
+  if(hour >= 5 && hour < 12) greeting = 'صبح بخیر';
+  else if(hour >= 12 && hour < 18) greeting = 'ظهر بخیر';
+  else greeting = 'شب بخیر';
+  const name = (profile.name || '').trim().split(' ')[0];
+  document.getElementById('greetingLine').textContent = name ? `${greeting}، ${name}` : `${greeting} 👋`;
+  document.getElementById('greetingSub').textContent = profile.major ? profile.major : 'دستیار دانشجویی گلستان';
+}
+
+// ---------- profile ----------
+function setPhotoPreview(dataUrl){
+  const img = document.getElementById('profilePhotoPreview');
+  const placeholder = document.getElementById('profilePhotoPlaceholder');
+  img.src = dataUrl; img.style.display='block'; placeholder.style.display='none';
+  document.getElementById('avatarMark').style.background = `center/cover url(${dataUrl})`;
+  document.getElementById('avatarMark').textContent = '';
+}
+document.getElementById('profilePhotoInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const size = 160;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      // برش مرکزی مربعی
+      const s = Math.min(img.width, img.height);
+      ctx.drawImage(img, (img.width-s)/2, (img.height-s)/2, s, s, 0, 0, size, size);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      profile.photo = dataUrl;
+      setPhotoPreview(dataUrl);
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('saveProfile').addEventListener('click', async ()=>{
+  profile.name = document.getElementById('profileName').value.trim();
+  profile.major = document.getElementById('profileMajor').value.trim();
+  await saveProfile();
+  renderGreeting();
+  const msg = document.getElementById('profileSavedMsg');
+  msg.innerHTML = '<div class="alert ok">پروفایل ذخیره شد.</div>';
+  setTimeout(()=>{ msg.innerHTML=''; }, 2500);
+});
+
 // ---------- courses ----------
 function chosenSlot(c){ return c.options[c.chosen] || c.options[0]; }
 
-function checkConflict(day, time, excludeId){
+// چک تداخل بین یک ست روز/ساعت جدید با همه دروس دیگه (روی هر روزی که مشترکه)
+function checkConflict(days, time, excludeId){
   const t = parseTime(time);
-  if(!t) return null;
+  if(!t || !days || !days.length) return null;
   for(const c of courses){
     if(c.id===excludeId) continue;
     const slot = chosenSlot(c);
     const st = parseTime(slot.time);
     if(!st) continue;
-    if(slot.day===day && overlap(st.start,st.end,t.start,t.end)) return c;
+    const sharedDay = slot.days.some(d=>days.includes(d));
+    if(sharedDay && overlap(st.start,st.end,t.start,t.end)) return c;
   }
   return null;
 }
 
+// چیپ‌های انتخاب روز — فرم افزودن درس اصلی
+function renderCDaysChips(){
+  const el = document.getElementById('cDaysChips');
+  el.innerHTML = DAYS.map(d=>`<span class="chip ${cDaysSelected.has(d)?'active':''}" onclick="toggleCDay('${d}')">${d}</span>`).join('');
+}
+function toggleCDay(d){ cDaysSelected.has(d) ? cDaysSelected.delete(d) : cDaysSelected.add(d); renderCDaysChips(); }
+window.toggleCDay = toggleCDay;
+
 document.getElementById('addCourse').addEventListener('click', async ()=>{
   const name = document.getElementById('cName').value.trim();
   const credit = parseFloat(document.getElementById('cCredit').value);
-  const day = document.getElementById('cDay').value;
+  const days = Array.from(cDaysSelected);
   const time = document.getElementById('cTime').value.trim();
   const term = document.getElementById('cTerm').value.trim();
   const exam = document.getElementById('cExam').value;
   const warnEl = document.getElementById('conflictWarning');
   if(!name || !credit){ alert('نام درس و تعداد واحد رو وارد کن.'); return; }
+  if(!days.length){ alert('حداقل یک روز کلاس رو انتخاب کن.'); return; }
 
-  const conflict = checkConflict(day, time, null);
+  const conflict = checkConflict(days, time, null);
   warnEl.innerHTML='';
   if(conflict){
-    warnEl.innerHTML = `<div class="alert">تداخل زمانی با «${conflict.name}» (${chosenSlot(conflict).day} ${chosenSlot(conflict).time}). درس اضافه شد ولی بهتره روز/ساعت رو اصلاح کنی یا گزینه زمانی دیگه‌ای اضافه کنی.</div>`;
+    const cs = chosenSlot(conflict);
+    warnEl.innerHTML = `<div class="alert">تداخل زمانی با «${conflict.name}» (${daysLabel(cs.days)} ${cs.time}). درس اضافه شد ولی بهتره روز/ساعت رو اصلاح کنی یا گزینه زمانی دیگه‌ای اضافه کنی.</div>`;
   }
 
-  courses.push({ id: Date.now(), name, credit, term, exam, grade: null, options:[{day,time}], chosen:0 });
+  courses.push({ id: Date.now(), name, credit, term, exam, grade: null, options:[{days, time}], chosen:0 });
   ['cName','cCredit','cTime','cTerm','cExam'].forEach(id=>document.getElementById(id).value='');
+  cDaysSelected = new Set();
+  renderCDaysChips();
   await saveCourses();
   renderAll();
 });
@@ -127,13 +210,29 @@ document.getElementById('addCourse').addEventListener('click', async ()=>{
 function removeCourse(id){ courses = courses.filter(c=>c.id!==id); saveCourses(); renderAll(); }
 function setGrade(id, val){ const c=courses.find(c=>c.id===id); if(c) c.grade = val===''?null:parseFloat(val); saveCourses(); renderGpa(); }
 function chooseOption(cid, idx){ const c=courses.find(c=>c.id===cid); if(c){ c.chosen = idx; saveCourses(); renderAll(); } }
+
+function toggleOptionDay(cid, d){
+  if(!optionDraftDays[cid]) optionDraftDays[cid] = new Set();
+  const set = optionDraftDays[cid];
+  set.has(d) ? set.delete(d) : set.add(d);
+  renderCourseList();
+  // بعد از رندر دوباره، subform رو باز نگه دار
+  const sub = document.getElementById('sub_'+cid);
+  if(sub) sub.classList.add('open');
+}
+window.toggleOptionDay = toggleOptionDay;
+
 function addOption(cid){
-  const day = document.getElementById('optDay_'+cid).value;
+  const set = optionDraftDays[cid];
+  const days = set ? Array.from(set) : [];
   const time = document.getElementById('optTime_'+cid).value.trim();
-  if(!time) return;
+  if(!days.length || !time){ alert('روز(های) و ساعت گزینه جدید رو وارد کن.'); return; }
   const c = courses.find(c=>c.id===cid);
-  c.options.push({day,time});
+  c.options.push({ days, time });
+  delete optionDraftDays[cid];
   saveCourses(); renderAll();
+  const sub = document.getElementById('sub_'+cid);
+  if(sub) sub.classList.add('open');
 }
 function toggleSub(id){ document.getElementById(id).classList.toggle('open'); }
 window.removeCourse=removeCourse; window.setGrade=setGrade; window.chooseOption=chooseOption;
@@ -144,18 +243,20 @@ function renderCourseList(){
   if(!courses.length){ el.innerHTML='<div class="empty">هنوز درسی اضافه نکردی.</div>'; return; }
   el.innerHTML = courses.map(c=>{
     const slot = chosenSlot(c);
-    const conflict = checkConflict(slot.day, slot.time, c.id);
+    const conflict = checkConflict(slot.days, slot.time, c.id);
     const optsHtml = c.options.map((o,i)=>`
       <label class="opt-row">
         <input type="radio" name="opt_${c.id}" ${i===c.chosen?'checked':''} onchange="chooseOption(${c.id},${i})">
-        <span>${o.day} · ${o.time || '—'}</span>
+        <span>${daysLabel(o.days)} · ${o.time || '—'}</span>
       </label>`).join('');
+    const draftSet = optionDraftDays[c.id] || new Set();
+    const draftChips = DAYS.map(d=>`<span class="chip ${draftSet.has(d)?'active':''}" onclick="toggleOptionDay(${c.id},'${d}')">${d}</span>`).join('');
     return `
     <div class="item" style="display:block;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
           <div class="name">${c.name}${c.term?` <span style="color:var(--muted);font-weight:400;font-size:11px;">· ${c.term}</span>`:''}</div>
-          <div class="meta">${slot.day} ${slot.time||''} · ${toFaDigits(c.credit)} واحد</div>
+          <div class="meta">${daysLabel(slot.days)} ${slot.time||''} · ${toFaDigits(c.credit)} واحد</div>
           ${conflict?`<div class="meta" style="color:var(--rose);">تداخل با ${conflict.name}</div>`:''}
         </div>
         <button class="btn ghost" onclick="removeCourse(${c.id})">حذف</button>
@@ -163,11 +264,12 @@ function renderCourseList(){
       <span class="toggle-link" onclick="toggleSub('sub_${c.id}')">گزینه‌های زمانی (${toFaDigits(c.options.length)})</span>
       <div class="subform" id="sub_${c.id}">
         ${optsHtml}
+        <div style="margin-top:8px;font-size:11.5px;color:var(--muted);">افزودن گزینه زمانی جدید (می‌تونی چند روز هم‌زمان انتخاب کنی):</div>
+        <div class="chip-row">${draftChips}</div>
         <div class="grid2" style="margin-top:8px;">
-          <select id="optDay_${c.id}">${DAYS.map(d=>`<option ${d===slot.day?'selected':''}>${d}</option>`).join('')}</select>
           <input id="optTime_${c.id}" placeholder="مثلاً 14-16">
+          <button class="btn small secondary" onclick="addOption(${c.id})">افزودن گزینه</button>
         </div>
-        <button class="btn small secondary" onclick="addOption(${c.id})">افزودن گزینه</button>
       </div>
     </div>`;
   }).join('');
@@ -182,14 +284,14 @@ function renderWeekTable(){
     DAYS.forEach(d=>{
       const match = courses.find(c=>{
         const s = chosenSlot(c);
-        if(s.day!==d) return false;
+        if(!s.days.includes(d)) return false;
         const t = parseTime(s.time);
         return t && Math.floor(t.start)===h;
       });
       let cellHtml = '';
       if(match){
         const s = chosenSlot(match);
-        const conflict = checkConflict(s.day, s.time, match.id);
+        const conflict = checkConflict(s.days, s.time, match.id);
         cellHtml = `<div class="slot ${conflict?'conflict':''}">${match.name}<br>${s.time}</div>`;
       }
       html += `<td>${cellHtml}</td>`;
@@ -226,7 +328,11 @@ document.getElementById('suggestBtn').addEventListener('click', ()=>{
   let best = null, bestScore = Infinity;
   function backtrack(idx, assignment, used){
     if(idx===list.length){
-      const score = assignment.reduce((s,oi,i)=> s + (prefs.includes(list[i].options[oi].day)?1:0), 0);
+      const score = assignment.reduce((s,oi,i)=>{
+        const days = list[i].options[oi].days;
+        const hit = days.some(d=>prefs.includes(d));
+        return s + (hit?1:0);
+      }, 0);
       if(score < bestScore){ bestScore = score; best = assignment.slice(); }
       return;
     }
@@ -235,9 +341,9 @@ document.getElementById('suggestBtn').addEventListener('click', ()=>{
       const opt = c.options[oi];
       const t = parseTime(opt.time);
       if(!t) continue;
-      let conflict = used.some(u=>u.day===opt.day && overlap(u.start,u.end,t.start,t.end));
+      let conflict = used.some(u=> u.days.some(d=>opt.days.includes(d)) && overlap(u.start,u.end,t.start,t.end));
       if(conflict) continue;
-      used.push({day:opt.day,start:t.start,end:t.end});
+      used.push({days:opt.days,start:t.start,end:t.end});
       assignment.push(oi);
       backtrack(idx+1, assignment, used);
       assignment.pop(); used.pop();
@@ -457,6 +563,7 @@ function renderReports(){
 }
 
 function renderAll(){
+  renderCDaysChips();
   renderCourseList();
   renderWeekTable();
   renderExamList();
@@ -473,4 +580,4 @@ function renderAll(){
 }
 
 loadAll();
-setInterval(()=>{ renderCountdown(); renderDashUpcoming(); }, 60000);
+setInterval(()=>{ renderCountdown(); renderDashUpcoming(); renderGreeting(); }, 60000);
