@@ -368,6 +368,7 @@
         <table class="sched" id="weekTable" style="min-width:760px;"></table>
       </div>
       <div id="weekLoadStats" class="stat-grid" style="margin-top:12px;"></div>
+      <button class="btn secondary block" id="downloadScheduleBtn" type="button">📥 دانلود برنامه هفتگی (عکس)</button>
     </div>
 
     <div class="card">
@@ -1325,11 +1326,11 @@ function renderCourseList(){
 
 function activeCourses(){ return courses.filter(c=>c.status!=='dropped' && c.status!=='emergency_dropped'); }
 
-function renderWeekTable(){
-  const table = document.getElementById('weekTable');
-  const hours = Array.from({length:12}, (_,i)=>8+i); // ستون‌های ساعت ۸ تا ۱۹
-  const list = activeCourses();
+const SCHED_HOURS = Array.from({length:12}, (_,i)=>8+i);
 
+// داده‌ی برنامه هفتگی رو یک‌بار می‌سازه و هم برای جدول HTML و هم خروجی عکس استفاده می‌شه
+function buildScheduleBlocks(){
+  const list = activeCourses();
   const sessionsByDay = {};
   DAYS.forEach(d=>sessionsByDay[d]=[]);
   list.forEach(c=>{
@@ -1340,23 +1341,34 @@ function renderWeekTable(){
       sessionsByDay[ses.day].push({ course:c, time:ses.time, start:t.start, end:t.end });
     });
   });
-  DAYS.forEach(d=> sessionsByDay[d].sort((a,b)=>a.start-b.start));
+  const blocksByDay = {};
+  DAYS.forEach(d=>{
+    sessionsByDay[d].sort((a,b)=>a.start-b.start);
+    blocksByDay[d] = sessionsByDay[d].map(x=>{
+      const colStart = Math.floor(x.start);
+      const colSpan = Math.max(1, Math.ceil(x.end) - colStart);
+      const conflict = !!checkConflict(chosenSlot(x.course).sessions, x.course.id);
+      return { name:x.course.name, time:x.time, colStart, colSpan, conflict, start:x.start, end:x.end };
+    });
+  });
+  return blocksByDay;
+}
 
-  // هدر: یک ستون برای اسم روز + یک ستون به‌ازای هر ساعت
+function renderWeekTable(){
+  const table = document.getElementById('weekTable');
+  const hours = SCHED_HOURS;
+  const blocksByDay = buildScheduleBlocks();
+
   let html = '<tr><th></th>' + hours.map(h=>`<th>${toFaDigits(h)}</th>`).join('') + '</tr>';
-
   DAYS.forEach(d=>{
     html += `<tr><th>${d}</th>`;
-    let skipUntil = -1; // تا کدوم ستون (به‌خاطر colspan قبلی) اشغاله
+    let skipUntil = -1;
     hours.forEach(h=>{
-      if(skipUntil >= h) return; // زیر یه colspan قبلیه، سلولی چاپ نمی‌کنیم
-      const match = sessionsByDay[d].find(x=>Math.floor(x.start)===h);
-      if(!match){ html += '<td></td>'; return; }
-      const colStart = Math.floor(match.start);
-      const colSpan = Math.max(1, Math.ceil(match.end) - colStart);
-      skipUntil = colStart + colSpan - 1;
-      const conflict = checkConflict(chosenSlot(match.course).sessions, match.course.id);
-      html += `<td colspan="${colSpan}"><div class="slot ${conflict?'conflict':''}" style="height:100%;">${match.course.name}<br>${match.time}</div></td>`;
+      if(skipUntil >= h) return;
+      const block = blocksByDay[d].find(b=>b.colStart===h);
+      if(!block){ html += '<td></td>'; return; }
+      skipUntil = block.colStart + block.colSpan - 1;
+      html += `<td colspan="${block.colSpan}"><div class="slot ${block.conflict?'conflict':''}" style="height:100%;">${block.name}<br>${block.time}</div></td>`;
     });
     html += '</tr>';
   });
@@ -1365,13 +1377,8 @@ function renderWeekTable(){
   // آمار بار هفتگی (#12 و #19)
   const perDay = {};
   DAYS.forEach(d=>perDay[d]={count:0,hours:0});
-  list.forEach(c=>{
-    chosenSlot(c).sessions.forEach(s=>{
-      const t = parseTime(s.time);
-      if(!t || !perDay[s.day]) return;
-      perDay[s.day].count += 1;
-      perDay[s.day].hours += (t.end - t.start);
-    });
+  DAYS.forEach(d=>{
+    blocksByDay[d].forEach(b=>{ perDay[d].count += 1; perDay[d].hours += (b.end-b.start); });
   });
   const daysWithClass = DAYS.filter(d=>perDay[d].count>0);
   const totalClasses = daysWithClass.reduce((s,d)=>s+perDay[d].count,0);
@@ -1389,6 +1396,110 @@ function renderWeekTable(){
     stat(busiest==='—'?'—':busiest,'شلوغ‌ترین روز') +
     stat(lightest==='—'?'—':lightest,'خلوت‌ترین روز');
 }
+
+// ---------- دانلود برنامه هفتگی به‌صورت عکس (بدون کتابخونه خارجی) ----------
+function downloadWeeklyScheduleImage(){
+  const hours = SCHED_HOURS;
+  const blocksByDay = buildScheduleBlocks();
+  const hasAny = DAYS.some(d=>blocksByDay[d].length);
+  if(!hasAny){ alert('هنوز درسی با روز/ساعت مشخص ثبت نکردی.'); return; }
+  const draw = () => drawScheduleCanvas(hours, blocksByDay);
+  if(document.fonts && document.fonts.ready){ document.fonts.ready.then(draw).catch(draw); }
+  else { draw(); }
+}
+
+function drawScheduleCanvas(hours, blocksByDay){
+  const cellW = 92, cellH = 74, labelW = 78, headerH = 46, titleH = 64, pad = 16;
+  const gridW = labelW + hours.length*cellW;
+  const gridH = headerH + DAYS.length*cellH;
+  const canvas = document.createElement('canvas');
+  canvas.width = gridW + pad*2;
+  canvas.height = titleH + gridH + pad*2;
+  const ctx = canvas.getContext('2d');
+
+  // پس‌زمینه
+  ctx.fillStyle = '#12141B';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = "700 22px Vazirmatn, Tahoma, sans-serif";
+  ctx.fillStyle = '#E8C766';
+  ctx.fillText(`برنامه هفتگی${profile.name ? ' — '+profile.name : ''}`, canvas.width/2, pad+22);
+
+  const gridX = pad, gridY = titleH + pad;
+
+  // خط‌های گرید + هدر ساعت‌ها (ساعت ۸ سمت راست، مطابق جدول روی صفحه)
+  ctx.font = "600 13px Vazirmatn, Tahoma, sans-serif";
+  ctx.fillStyle = '#949BAC';
+  hours.forEach((h,i)=>{
+    const x = gridX + gridW - labelW - (i+1)*cellW;
+    ctx.fillText(toFaDigits(h), x + cellW/2, gridY + headerH/2);
+  });
+
+  // خط‌های افقی/عمودی پایه
+  ctx.strokeStyle = '#2B3040';
+  ctx.lineWidth = 1;
+  for(let i=0;i<=DAYS.length;i++){
+    const y = gridY + headerH + i*cellH;
+    ctx.beginPath(); ctx.moveTo(gridX, y); ctx.lineTo(gridX+gridW, y); ctx.stroke();
+  }
+  for(let i=0;i<=hours.length;i++){
+    const x = gridX + (hours.length-i)*cellW;
+    ctx.beginPath(); ctx.moveTo(x, gridY); ctx.lineTo(x, gridY+gridH); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(gridX+gridW-labelW, gridY); ctx.lineTo(gridX+gridW-labelW, gridY+gridH); ctx.stroke();
+
+  // اسم روزها (ستون سمت راست)
+  ctx.font = "700 14px Vazirmatn, Tahoma, sans-serif";
+  ctx.fillStyle = '#EDEBE3';
+  DAYS.forEach((d,j)=>{
+    const y = gridY + headerH + j*cellH + cellH/2;
+    ctx.fillText(d, gridX+gridW-labelW/2, y);
+  });
+
+  // بلاک کلاس‌ها
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+  DAYS.forEach((d,j)=>{
+    blocksByDay[d].forEach(b=>{
+      const hourIndex = hours.indexOf(b.colStart);
+      if(hourIndex<0) return;
+      const w = b.colSpan*cellW - 6;
+      const x = gridX + gridW - labelW - (hourIndex+b.colSpan)*cellW + 3;
+      const y = gridY + headerH + j*cellH + 3;
+      const h = cellH - 6;
+      ctx.fillStyle = '#212636';
+      roundRect(x,y,w,h,8); ctx.fill();
+      ctx.strokeStyle = b.conflict ? '#C4665A' : '#C9A227';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x+w-2,y+4); ctx.lineTo(x+w-2,y+h-4); ctx.stroke();
+      ctx.fillStyle = '#EDEBE3';
+      ctx.font = "700 12.5px Vazirmatn, Tahoma, sans-serif";
+      ctx.fillText(b.name, x+w/2, y+h/2-10, w-10);
+      ctx.font = "500 11px Vazirmatn, Tahoma, sans-serif";
+      ctx.fillStyle = '#C9A227';
+      ctx.fillText(b.time, x+w/2, y+h/2+10, w-10);
+    });
+  });
+
+  canvas.toBlob(blob=>{
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'برنامه-هفتگی-ادیب.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+}
+
 
 function renderExamList(){
   const el = document.getElementById('examList');
@@ -2130,6 +2241,7 @@ function renderAll(){
 }
 
 loadAll();
+document.getElementById('downloadScheduleBtn').addEventListener('click', downloadWeeklyScheduleImage);
 setInterval(()=>{ renderCountdown(); renderDashUpcoming(); renderGreeting(); renderTodayCard(); }, 60000);
 </script>
 </body>
