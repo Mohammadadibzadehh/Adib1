@@ -97,9 +97,10 @@
 
   .grade-input{width:60px;text-align:center;flex:0 0 auto;}
 
-  table.sched{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px;}
+  table.sched{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px;table-layout:fixed;}
   table.sched th{color:var(--muted);font-weight:600;padding:4px 2px;font-size:10.5px;}
-  table.sched td{border:1px solid var(--line);height:44px;vertical-align:top;padding:3px;border-radius:4px;}
+  table.sched th:first-child{width:64px;}
+  table.sched td{border:1px solid var(--line);height:52px;vertical-align:top;padding:3px;border-radius:4px;width:58px;}
   .slot{background:var(--panel-2);border-right:3px solid var(--gold);border-radius:4px;padding:3px 4px;font-size:10px;line-height:1.3;height:100%;}
   .slot.conflict{border-right-color:var(--rose);}
 
@@ -362,8 +363,10 @@
     </div>
 
     <div class="card">
-      <h2>برنامه هفتگی</h2>
-      <table class="sched" id="weekTable"></table>
+      <h2>برنامه هفتگی<small>برای دیدن ساعت‌های بیشتر، جدول رو به چپ/راست بکش</small></h2>
+      <div style="overflow-x:auto;">
+        <table class="sched" id="weekTable" style="min-width:760px;"></table>
+      </div>
       <div id="weekLoadStats" class="stat-grid" style="margin-top:12px;"></div>
     </div>
 
@@ -588,9 +591,13 @@ function toEnDigits(s){
 }
 function parseTime(str){
   if(!str) return null;
-  const nums = toEnDigits(str).match(/\d+(\.\d+)?/g);
-  if(!nums || nums.length<2) return null;
-  return { start: parseFloat(nums[0]), end: parseFloat(nums[1]) };
+  const t = toEnDigits(str);
+  const m = t.match(/(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?/);
+  if(!m) return null;
+  const start = parseInt(m[1]) + (m[2] ? parseInt(m[2])/60 : 0);
+  const end = parseInt(m[3]) + (m[4] ? parseInt(m[4])/60 : 0);
+  if(isNaN(start) || isNaN(end) || end<=start) return null;
+  return { start, end };
 }
 function overlap(s1,e1,s2,e2){ return s1 < e2 && s2 < e1; }
 function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
@@ -1026,7 +1033,67 @@ function finalizeTerm(termId){
   saveTerms();
   renderAll();
 }
+function reopenTerm(termId){
+  const term = terms.find(t=>t.id===termId);
+  if(!term) return;
+  if(!confirm(`ترم «${term.name}» دوباره فعال بشه؟`)) return;
+  term.status = 'active';
+  delete term.finalizedAt;
+  saveTerms();
+  renderAll();
+}
 window.finalizeTerm = finalizeTerm;
+window.reopenTerm = reopenTerm;
+
+let termEditOpen = {};
+let termHistOpen = {};
+function toggleTermEdit(termId){ termEditOpen[termId] = !termEditOpen[termId]; renderTerms(); }
+function saveTermName(termId){
+  const input = document.getElementById('termNameEdit_'+termId);
+  const name = input.value.trim();
+  if(!name){ alert('اسم ترم نمی‌تونه خالی باشه.'); return; }
+  if(terms.some(t=>t.id!==termId && t.name===name)){ alert('ترمی با همین اسم قبلاً هست.'); return; }
+  const term = terms.find(t=>t.id===termId);
+  term.name = name;
+  termEditOpen[termId] = false;
+  saveTerms();
+  renderAll();
+}
+function deleteTerm(termId){
+  const term = terms.find(t=>t.id===termId);
+  const count = courses.filter(c=>c.termId===termId).length;
+  if(count){ alert(`این ترم ${toFaDigits(count)} درس داره؛ اول درس‌هاش رو حذف کن یا به ترم دیگه‌ای منتقلشون کن.`); return; }
+  if(!confirm(`ترم «${term.name}» حذف بشه؟`)) return;
+  terms = terms.filter(t=>t.id!==termId);
+  if(profile.currentTermId===termId) profile.currentTermId = null;
+  saveTerms(); saveProfile();
+  renderAll();
+}
+window.toggleTermEdit=toggleTermEdit; window.saveTermName=saveTermName; window.deleteTerm=deleteTerm;
+
+function toggleTermHist(termId){ termHistOpen[termId] = !termHistOpen[termId]; renderTerms(); }
+window.toggleTermHist = toggleTermHist;
+
+function addHistoricalCourse(termId){
+  const name = document.getElementById('histName_'+termId).value.trim();
+  const credit = parseFloat(document.getElementById('histCredit_'+termId).value);
+  const gradeRaw = document.getElementById('histGrade_'+termId).value;
+  const status = document.getElementById('histStatus_'+termId).value;
+  if(!name){ alert('نام درس رو وارد کن.'); return; }
+  if(!credit || credit<=0){ alert('تعداد واحد باید بزرگ‌تر از صفر باشه.'); return; }
+  const grade = gradeRaw==='' ? null : clamp(parseFloat(gradeRaw)||0, 0, 20);
+  const breakdown = {};
+  GRADE_COMPONENTS.forEach(g=>{ breakdown[g.key] = { score:'', weight:g.defaultWeight }; });
+  courses.push({
+    id: Date.now(), name, credit, termId,
+    exam:'', grade, status, breakdown,
+    options:[{ sessions: [] }], chosen:0
+  });
+  ['histName_','histCredit_','histGrade_'].forEach(p=>{ const el=document.getElementById(p+termId); if(el) el.value=''; });
+  saveCourses();
+  renderAll();
+}
+window.addHistoricalCourse = addHistoricalCourse;
 
 function renderTerms(){
   const el = document.getElementById('termsList');
@@ -1035,23 +1102,53 @@ function renderTerms(){
   el.innerHTML = sorted.map(t=>{
     const termCourses = courses.filter(c=>c.termId===t.id);
     const isCurrent = profile.currentTermId===t.id;
+    const editing = !!termEditOpen[t.id];
+    const histOpen = !!termHistOpen[t.id];
+    const courseListHtml = termCourses.length ? termCourses.map(c=>
+      `<div class="meta">• ${c.name} (${toFaDigits(c.credit)} واحد) — ${STATUS_LABELS[c.status]||c.status}</div>`
+    ).join('') : '';
     return `
     <div class="term-item ${t.status==='completed'?'completed':''}">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div class="name">${t.name} ${isCurrent?'<span class="badge">ترم جاری</span>':''}</div>
+        <div style="flex:1;">
+          ${editing ? `
+            <div style="display:flex;gap:6px;">
+              <input id="termNameEdit_${t.id}" value="${t.name.replace(/"/g,'&quot;')}" style="flex:1;">
+              <button class="btn small" onclick="saveTermName('${t.id}')">ذخیره</button>
+            </div>
+          ` : `<div class="name">${t.name} ${isCurrent?'<span class="badge">ترم جاری</span>':''}</div>`}
           <div class="meta">${toFaDigits(termCourses.length)} درس ${t.status==='completed' ? '· پایان‌یافته' : ''}</div>
         </div>
         <span class="term-badge ${t.status}">${t.status==='completed'?'پایان‌یافته':'فعال'}</span>
       </div>
-      ${t.status==='active' ? `
-        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-          ${!isCurrent?`<button class="btn small secondary" onclick="setCurrentTerm('${t.id}')">تعیین به‌عنوان ترم جاری</button>`:''}
-          <button class="btn small" onclick="finalizeTerm('${t.id}')">پایان ترم</button>
-        </div>` : ''}
+
+      ${courseListHtml ? `<div style="margin-top:6px;">${courseListHtml}</div>` : ''}
+
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+        ${!editing?`<button class="btn small secondary" type="button" onclick="toggleTermEdit('${t.id}')">✏️ ویرایش نام</button>`:''}
+        ${(!isCurrent && t.status==='active')?`<button class="btn small secondary" onclick="setCurrentTerm('${t.id}')">تعیین به‌عنوان ترم جاری</button>`:''}
+        ${t.status==='active' ? `<button class="btn small" onclick="finalizeTerm('${t.id}')">پایان ترم</button>` : `<button class="btn small secondary" onclick="reopenTerm('${t.id}')">بازگشایی ترم</button>`}
+        ${!termCourses.length ? `<button class="btn small ghost" onclick="deleteTerm('${t.id}')">حذف ترم</button>` : ''}
+      </div>
+
+      <span class="toggle-link" onclick="toggleTermHist('${t.id}')">${histOpen?'بستن':'+ افزودن درس قدیمی به این ترم (بدون نیاز به روز/ساعت کلاس)'}</span>
+      <div class="subform ${histOpen?'open':''}">
+        <div class="grid2">
+          <input id="histName_${t.id}" placeholder="نام درس">
+          <input id="histCredit_${t.id}" type="number" min="1" placeholder="تعداد واحد">
+        </div>
+        <div class="grid2" style="margin-top:6px;">
+          <input id="histGrade_${t.id}" type="number" min="0" max="20" step="0.25" placeholder="نمره (اختیاری)">
+          <select id="histStatus_${t.id}">
+            ${Object.keys(STATUS_LABELS).map(k=>`<option value="${k}" ${k==='passed'?'selected':''}>${STATUS_LABELS[k]}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn small block" type="button" onclick="addHistoricalCourse('${t.id}')">افزودن درس به این ترم</button>
+      </div>
     </div>`;
   }).join('');
 }
+
 
 // ---------- course-add form: term select ----------
 function refreshTermSelect(){
@@ -1230,28 +1327,36 @@ function activeCourses(){ return courses.filter(c=>c.status!=='dropped' && c.sta
 
 function renderWeekTable(){
   const table = document.getElementById('weekTable');
-  const hours = Array.from({length:12}, (_,i)=>8+i);
+  const hours = Array.from({length:12}, (_,i)=>8+i); // ستون‌های ساعت ۸ تا ۱۹
   const list = activeCourses();
-  let html = '<tr><th></th>' + DAYS.map(d=>`<th>${d}</th>`).join('') + '</tr>';
-  hours.forEach(h=>{
-    html += `<tr><th>${toFaDigits(h)}</th>`;
-    DAYS.forEach(d=>{
-      const match = list.find(c=>{
-        const s = chosenSlot(c);
-        return s.sessions.some(ses=>{
-          if(ses.day!==d) return false;
-          const t = parseTime(ses.time);
-          return t && Math.floor(t.start)===h;
-        });
-      });
-      let cellHtml = '';
-      if(match){
-        const s = chosenSlot(match);
-        const ses = s.sessions.find(x=>x.day===d && parseTime(x.time) && Math.floor(parseTime(x.time).start)===h);
-        const conflict = checkConflict(s.sessions, match.id);
-        cellHtml = `<div class="slot ${conflict?'conflict':''}">${match.name}<br>${ses.time}</div>`;
-      }
-      html += `<td>${cellHtml}</td>`;
+
+  const sessionsByDay = {};
+  DAYS.forEach(d=>sessionsByDay[d]=[]);
+  list.forEach(c=>{
+    const s = chosenSlot(c);
+    s.sessions.forEach(ses=>{
+      const t = parseTime(ses.time);
+      if(!t || !sessionsByDay[ses.day]) return;
+      sessionsByDay[ses.day].push({ course:c, time:ses.time, start:t.start, end:t.end });
+    });
+  });
+  DAYS.forEach(d=> sessionsByDay[d].sort((a,b)=>a.start-b.start));
+
+  // هدر: یک ستون برای اسم روز + یک ستون به‌ازای هر ساعت
+  let html = '<tr><th></th>' + hours.map(h=>`<th>${toFaDigits(h)}</th>`).join('') + '</tr>';
+
+  DAYS.forEach(d=>{
+    html += `<tr><th>${d}</th>`;
+    let skipUntil = -1; // تا کدوم ستون (به‌خاطر colspan قبلی) اشغاله
+    hours.forEach(h=>{
+      if(skipUntil >= h) return; // زیر یه colspan قبلیه، سلولی چاپ نمی‌کنیم
+      const match = sessionsByDay[d].find(x=>Math.floor(x.start)===h);
+      if(!match){ html += '<td></td>'; return; }
+      const colStart = Math.floor(match.start);
+      const colSpan = Math.max(1, Math.ceil(match.end) - colStart);
+      skipUntil = colStart + colSpan - 1;
+      const conflict = checkConflict(chosenSlot(match.course).sessions, match.course.id);
+      html += `<td colspan="${colSpan}"><div class="slot ${conflict?'conflict':''}" style="height:100%;">${match.course.name}<br>${match.time}</div></td>`;
     });
     html += '</tr>';
   });
