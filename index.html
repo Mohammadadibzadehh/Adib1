@@ -380,12 +380,14 @@
   <!-- GRADES -->
   <section class="view" id="grades">
     <div class="card">
-      <h2>ثبت نمرات و وضعیت</h2>
-      <div id="gradeInputs"><div class="empty">اول از بخش «انتخاب واحد» درس اضافه کن.</div></div>
+      <h2>📘 معدل همین ترم<small>برای محاسبه سریع معدل ترم جاری، مخصوصاً آخرای ترم</small></h2>
+      <div id="currentTermLabel" class="meta" style="margin-bottom:8px;"></div>
+      <div class="gpa-big"><span class="val" id="termGpaVal">۰.۰۰</span><span class="of">از ۲۰ (فقط این ترم)</span></div>
+      <div id="currentTermGradeInputs"><div class="empty">درسی برای ترم جاری ثبت نشده.</div></div>
     </div>
 
     <div class="card">
-      <h2>معدل کل و فاصله تا هدف</h2>
+      <h2>📊 معدل کل و فاصله تا هدف<small>مجموع همه ترم‌ها</small></h2>
       <div class="gpa-big"><span class="val" id="gpaVal">۰.۰۰</span><span class="of">از ۲۰</span></div>
       <div class="gap-msg" id="gapMsg"></div>
       <div class="grid2">
@@ -397,7 +399,7 @@
     </div>
 
     <div class="card">
-      <h2>معدل ترمی<small>میانگین هر ترم به‌طور جداگانه</small></h2>
+      <h2>معدل ترمی<small>میانگین هر ترم به‌طور جداگانه — نمرات ترم‌های قبلی از تب «ترم‌ها» وارد و ویرایش می‌شن</small></h2>
       <table class="term-table" id="termTable"></table>
     </div>
   </section>
@@ -1079,10 +1081,13 @@ function addHistoricalCourse(termId){
   const name = document.getElementById('histName_'+termId).value.trim();
   const credit = parseFloat(document.getElementById('histCredit_'+termId).value);
   const gradeRaw = document.getElementById('histGrade_'+termId).value;
-  const status = document.getElementById('histStatus_'+termId).value;
+  const manualStatus = document.getElementById('histStatus_'+termId).value;
   if(!name){ alert('نام درس رو وارد کن.'); return; }
   if(!credit || credit<=0){ alert('تعداد واحد باید بزرگ‌تر از صفر باشه.'); return; }
   const grade = gradeRaw==='' ? null : clamp(parseFloat(gradeRaw)||0, 0, 20);
+  // اگه نمره وارد شده، خودش وضعیت رو تعیین می‌کنه (زیر ۱۰ افتاد، ۱۰ به بالا پاس)؛
+  // فقط وقتی نمره خالیه، انتخاب دستی (مثلاً حذف شده) اعمال می‌شه.
+  const status = grade!==null ? (grade>=10 ? 'passed' : 'failed') : manualStatus;
   const breakdown = {};
   GRADE_COMPONENTS.forEach(g=>{ breakdown[g.key] = { score:'', weight:g.defaultWeight }; });
   courses.push({
@@ -1105,8 +1110,22 @@ function renderTerms(){
     const isCurrent = profile.currentTermId===t.id;
     const editing = !!termEditOpen[t.id];
     const histOpen = !!termHistOpen[t.id];
-    const courseListHtml = termCourses.length ? termCourses.map(c=>
-      `<div class="meta">• ${c.name} (${toFaDigits(c.credit)} واحد) — ${STATUS_LABELS[c.status]||c.status}</div>`
+    const courseListHtml = termCourses.length ? termCourses.map(c=>`
+      <div class="item" style="padding:8px 10px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:120px;">
+          <div class="name" style="font-size:12.5px;">${c.name}</div>
+          <div class="meta">${toFaDigits(c.credit)} واحد · <span style="color:${c.status==='passed'?'var(--teal)':c.status==='failed'?'var(--rose)':'var(--muted)'};">${STATUS_LABELS[c.status]||c.status}</span></div>
+        </div>
+        <input class="grade-input" type="number" min="0" max="20" step="0.25" value="${c.grade ?? ''}" placeholder="نمره" onchange="setGrade(${c.id}, this.value)">
+        <select style="width:auto;min-width:92px;font-size:11px;padding:6px;" onchange="setStatus(${c.id}, this.value)">
+          <option value="auto" ${c.status==='pending'?'selected':''}>خودکار</option>
+          <option value="passed" ${c.status==='passed'?'selected':''}>پاس شد</option>
+          <option value="failed" ${c.status==='failed'?'selected':''}>افتاد</option>
+          <option value="dropped" ${c.status==='dropped'?'selected':''}>حذف شد</option>
+          <option value="emergency_dropped" ${c.status==='emergency_dropped'?'selected':''}>حذف اضطراری</option>
+        </select>
+        <button class="btn ghost" onclick="removeCourse(${c.id})">حذف</button>
+      </div>`
     ).join('') : '';
     return `
     <div class="term-item ${t.status==='completed'?'completed':''}">
@@ -1141,9 +1160,10 @@ function renderTerms(){
         <div class="grid2" style="margin-top:6px;">
           <input id="histGrade_${t.id}" type="number" min="0" max="20" step="0.25" placeholder="نمره (اختیاری)">
           <select id="histStatus_${t.id}">
-            ${Object.keys(STATUS_LABELS).map(k=>`<option value="${k}" ${k==='passed'?'selected':''}>${STATUS_LABELS[k]}</option>`).join('')}
+            ${Object.keys(STATUS_LABELS).map(k=>`<option value="${k}" ${k==='pending'?'selected':''}>${STATUS_LABELS[k]}</option>`).join('')}
           </select>
         </div>
+        <div class="meta" style="margin-top:4px;">اگه نمره وارد کنی، وضعیت خودکار تعیین می‌شه (زیر ۱۰ افتاد، ۱۰ به بالا پاس)؛ گزینه کنارش فقط وقتی نمره خالیه (مثلاً حذف‌شده) استفاده می‌شه.</div>
         <button class="btn small block" type="button" onclick="addHistoricalCourse('${t.id}')">افزودن درس به این ترم</button>
       </div>
     </div>`;
@@ -1241,8 +1261,25 @@ document.getElementById('addCourse').addEventListener('click', async ()=>{
 });
 
 function removeCourse(id){ courses = courses.filter(c=>c.id!==id); saveCourses(); renderAll(); }
-function setGrade(id, val){ const c=courses.find(c=>c.id===id); if(c){ const v=parseFloat(val); c.grade = val===''?null:clamp(v,0,20); } saveCourses(); renderGpa(); }
-function setStatus(id, val){ const c=courses.find(c=>c.id===id); if(c) c.status = val; saveCourses(); renderAll(); }
+function autoStatusFromGrade(c, grade){
+  if(grade===null) { if(c.status==='passed'||c.status==='failed') return 'pending'; return c.status; }
+  if(c.status==='dropped' || c.status==='emergency_dropped') return c.status; // دست‌نخورده بمونه
+  return grade >= 10 ? 'passed' : 'failed';
+}
+function setGrade(id, val){
+  const c=courses.find(c=>c.id===id);
+  if(c){
+    const v = val===''?null:clamp(parseFloat(val)||0,0,20);
+    c.grade = v;
+    c.status = autoStatusFromGrade(c, v);
+  }
+  saveCourses(); renderAll();
+}
+function setStatus(id, val){
+  const c=courses.find(c=>c.id===id);
+  if(c){ c.status = (val==='auto') ? autoStatusFromGrade({...c, status:'pending'}, c.grade) : val; }
+  saveCourses(); renderAll();
+}
 function chooseOption(cid, idx){ const c=courses.find(c=>c.id===cid); if(c){ c.chosen = idx; saveCourses(); renderAll(); } }
 window.setStatus = setStatus;
 
@@ -1807,27 +1844,40 @@ function updateBreakdown(cid, key, field, val){
   if(field==='weight'){ val = clamp(parseFloat(val)||0, 0, 100); }
   c.breakdown[key][field] = val;
   saveCourses();
-  renderGradeInputs();
+  renderCurrentTermGradeInputs();
 }
-function toggleGradeDetail(cid){ gradeDetailOpen[cid] = !gradeDetailOpen[cid]; renderGradeInputs(); }
+function toggleGradeDetail(cid){ gradeDetailOpen[cid] = !gradeDetailOpen[cid]; renderCurrentTermGradeInputs(); }
 function applyBreakdown(cid){
   const c = courses.find(c=>c.id===cid);
   if(!c) return;
   const { final } = computeBreakdown(c);
   if(final===null){ alert('حداقل یکی از نمره‌ها رو وارد کن.'); return; }
-  c.grade = Math.round(clamp(final,0,20)*100)/100;
+  const grade = Math.round(clamp(final,0,20)*100)/100;
+  c.grade = grade;
+  c.status = autoStatusFromGrade(c, grade);
   saveCourses();
-  renderGradeInputs();
-  renderGpa();
+  renderAll();
 }
 window.updateBreakdown=updateBreakdown; window.toggleGradeDetail=toggleGradeDetail; window.applyBreakdown=applyBreakdown;
 
-function renderGradeInputs(){
-  const el = document.getElementById('gradeInputs');
-  if(!courses.length){ el.innerHTML='<div class="empty">اول از بخش «انتخاب واحد» درس اضافه کن.</div>'; return; }
-  el.innerHTML = courses.map(c=>{
+// فقط دروس ترم جاری — برای محاسبه سریع معدل همین ترم (میان‌ترم/پایان‌ترم/پروژه/حضور غیاب)
+function renderCurrentTermGradeInputs(){
+  const el = document.getElementById('currentTermGradeInputs');
+  const labelEl = document.getElementById('currentTermLabel');
+  const currentTerm = terms.find(t=>t.id===profile.currentTermId);
+  labelEl.textContent = currentTerm ? `ترم جاری: ${currentTerm.name}` : 'هنوز ترم جاری رو مشخص نکردی (از تب «ترم‌ها»).';
+
+  const termCourses = currentTerm ? courses.filter(c=>c.termId===currentTerm.id) : [];
+  if(!termCourses.length){
+    el.innerHTML = '<div class="empty">درسی برای ترم جاری ثبت نشده.</div>';
+    document.getElementById('termGpaVal').textContent = '۰.۰۰';
+    return;
+  }
+  const superseded = getSupersededCourseIds();
+  el.innerHTML = termCourses.map(c=>{
     const { parts, final } = computeBreakdown(c);
     const open = !!gradeDetailOpen[c.id];
+    const isSuperseded = superseded.has(c.id);
     const rows = parts.map(p=>`
       <div class="grid2" style="margin-top:6px;align-items:center;">
         <div style="font-size:12px;color:var(--muted);">${p.label} <span style="opacity:.7;">(وزن ${toFaDigits(p.weight)}%)</span></div>
@@ -1839,16 +1889,12 @@ function renderGradeInputs(){
         </div>
       </div>`).join('');
     return `
-    <div class="item" style="display:block;">
+    <div class="item" style="display:block;${isSuperseded?'opacity:.6;':''}">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-        <div><div class="name">${c.name}</div><div class="meta">${termNameOf(c.termId)} · ${toFaDigits(c.credit)} واحد</div></div>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <input class="grade-input" type="number" min="0" max="20" step="0.25" value="${c.grade ?? ''}" placeholder="نمره" onchange="setGrade(${c.id}, this.value)">
-          <select class="status-select" onchange="setStatus(${c.id}, this.value)">
-            ${Object.keys(STATUS_LABELS).map(k=>`<option value="${k}" ${c.status===k?'selected':''}>${STATUS_LABELS[k]}</option>`).join('')}
-          </select>
-        </div>
+        <div><div class="name">${c.name}</div><div class="meta">${toFaDigits(c.credit)} واحد · ${STATUS_LABELS[c.status]}</div></div>
+        <input class="grade-input" type="number" min="0" max="20" step="0.25" value="${c.grade ?? ''}" placeholder="نمره" onchange="setGrade(${c.id}, this.value)">
       </div>
+      ${isSuperseded ? `<div class="meta" style="color:var(--gold-soft);margin-top:4px;">🔁 این درس دوباره در ترم دیگه‌ای گرفته شده؛ این نمره بی‌اثره و توی معدل حساب نمی‌شه.</div>` : ''}
       <span class="toggle-link" onclick="toggleGradeDetail(${c.id})">جزئیات نمره (میان‌ترم، پایان‌ترم، پروژه، حضور و غیاب)</span>
       <div class="subform ${open?'open':''}">
         ${rows}
@@ -1859,11 +1905,36 @@ function renderGradeInputs(){
       </div>
     </div>`;
   }).join('');
+  document.getElementById('termGpaVal').textContent = toFaDigits(gpaOf(termCourses).gpa.toFixed(2));
+}
+// و بقیه (مثلاً افتادگی قبلی که بعداً پاس شده) به‌طور خودکار از معدل کنار گذاشته می‌شن.
+function getSupersededCourseIds(){
+  const byName = {};
+  courses.forEach(c=>{
+    const key = (c.name||'').trim().toLowerCase();
+    if(!key) return;
+    (byName[key] = byName[key] || []).push(c);
+  });
+  const excluded = new Set();
+  Object.values(byName).forEach(group=>{
+    if(group.length < 2) return;
+    const withOrder = group.map(c=>{
+      const t = terms.find(t=>t.id===c.termId);
+      return { c, order: t ? t.order : -1 };
+    }).sort((a,b)=> a.order - b.order || a.c.id - b.c.id);
+    for(let i=0; i<withOrder.length-1; i++){ excluded.add(withOrder[i].c.id); }
+  });
+  return excluded;
 }
 
-// معدل: فقط دروسی که نمره دارن و حذف/حذف‌اضطراری نیستن
+// معدل: فقط دروسی که نمره دارن، حذف/حذف‌اضطراری نیستن، و با تکرار درس بی‌اثر نشدن
 function gpaOf(list){
-  const graded = list.filter(c=>c.grade!==null && c.grade!==undefined && !isNaN(c.grade) && c.status!=='dropped' && c.status!=='emergency_dropped');
+  const superseded = getSupersededCourseIds();
+  const graded = list.filter(c=>
+    c.grade!==null && c.grade!==undefined && !isNaN(c.grade) &&
+    c.status!=='dropped' && c.status!=='emergency_dropped' &&
+    !superseded.has(c.id)
+  );
   const totalCredit = graded.reduce((s,c)=>s+c.credit,0);
   const totalPoints = graded.reduce((s,c)=>s+c.credit*c.grade,0);
   return { gpa: totalCredit? totalPoints/totalCredit : 0, totalCredit, totalPoints, graded };
@@ -2224,7 +2295,7 @@ function renderAll(){
   renderWeekTable();
   renderExamList();
   renderDayChips();
-  renderGradeInputs();
+  renderCurrentTermGradeInputs();
   renderGpa();
   renderCalendar();
   refreshCourseSelects();
