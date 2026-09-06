@@ -2155,11 +2155,13 @@ function renderTodayCard(){
 
 function renderAcademicStatus(){
   const total = academic.totalCredits || 0;
-  const passed = clamp(passedCreditsTotal(), 0, total || Infinity);
+  const rawPassed = passedCreditsTotal();
+  const passed = clamp(rawPassed, 0, total || Infinity);
   const remaining = Math.max(0, total - passed);
   const pct = total>0 ? clamp((passed/total)*100, 0, 100) : 0;
-  document.getElementById('dashCreditsLine').textContent = total
-    ? `📚 واحد گذرانده: ${toFaDigits(passed)} از ${toFaDigits(total)}`
+  document.getElementById('dashCreditsLine').innerHTML = total
+    ? `📚 واحد گذرانده: ${toFaDigits(passed)} از ${toFaDigits(total)}` +
+      (total>0 && rawPassed>total ? `<div class="warn-box" style="margin-top:8px;">⚠️ عدد واحد گذرانده از کل بیشتر شده (احتمالاً هم «واحد پایه» وارد کردی هم درس‌ها رو جدا جدا). <span class="toggle-link" onclick="document.querySelector(\`nav.tabs button[data-view='profile']\`).click()">برو تب پروفایل و درستش کن</span></div>` : '')
     : 'اطلاعات واحدها ثبت نشده — از تب پروفایل تکمیل کن.';
   document.getElementById('dashProgressBar').style.width = pct + '%';
   document.getElementById('dashProgressPct').textContent = total ? `🎓 پیشرفت فارغ‌التحصیلی: ${toFaDigits(Math.round(pct))}٪` : '';
@@ -2233,11 +2235,30 @@ function renderReports(){
   `).join('');
 }
 
+function fixBaselineToZero(){
+  academic.baselinePassed = 0;
+  saveAcademic();
+  renderAll();
+}
+window.fixBaselineToZero = fixBaselineToZero;
+
 function renderProfileSummary(){
-  const total = academic.totalCredits||0, passed = passedCreditsTotal();
+  const total = academic.totalCredits||0;
+  const fromCourses = courses.filter(c=>c.status==='passed').reduce((s,c)=>s+(parseFloat(c.credit)||0),0);
+  const baseline = academic.baselinePassed||0;
+  const passed = passedCreditsTotal();
   const pct = total ? Math.round((passed/total)*100) : 0;
   const { gpa } = gpaOf(courses);
+  const overCounted = total>0 && passed>total;
   document.getElementById('profileSummary').innerHTML = `
+    <div class="meta" style="margin-bottom:10px;">
+      واحد گذرانده = پایه (${toFaDigits(baseline)}) + از دروس ثبت‌شده در برنامه (${toFaDigits(fromCourses)}) = ${toFaDigits(passed)}
+    </div>
+    ${overCounted ? `
+      <div class="warn-box">
+        ⚠️ واحد گذرانده (${toFaDigits(passed)}) از کل واحدها (${toFaDigits(total)}) بیشتره — احتمالاً هم عدد «واحد گذرانده پایه» رو وارد کردی و هم درس‌ها رو تک‌تک ثبت کردی، پس دوباره‌شماری شده.
+        <div style="margin-top:6px;"><span class="toggle-link" onclick="fixBaselineToZero()">تصحیح خودکار (صفر کردن واحد پایه، چون درس‌ها جداگانه ثبت شدن)</span></div>
+      </div>` : ''}
     <div class="stat-grid">
       <div class="stat-box"><div class="n">${profile.university||'—'}</div><div class="l">دانشگاه</div></div>
       <div class="stat-box"><div class="n">${profile.major||'—'}</div><div class="l">رشته</div></div>
