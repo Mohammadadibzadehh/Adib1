@@ -1206,11 +1206,12 @@ document.getElementById('addSessionRow').addEventListener('click', ()=>{
 // ---------- courses: core ----------
 function chosenSlot(c){ return c.options[c.chosen] || c.options[0]; }
 function slotLabel(slot){ return slot.sessions.map(s=>`${s.day} ${s.time||'—'}`).join('، '); }
-function checkConflict(sessions, excludeId){
+function checkConflict(sessions, excludeId, termId){
   const valid = sessions.filter(s=>parseTime(s.time));
   if(!valid.length) return null;
   for(const c of courses){
     if(c.id===excludeId) continue;
+    if(termId!==undefined && c.termId!==termId) continue; // فقط تداخل داخل همون ترم معنی داره
     if(c.status==='dropped' || c.status==='emergency_dropped') continue;
     const slot = chosenSlot(c);
     for(const os of slot.sessions){
@@ -1236,7 +1237,7 @@ document.getElementById('addCourse').addEventListener('click', async ()=>{
   const sessions = cSessions.filter(s=>s.time.trim());
   if(!sessions.length){ alert('حداقل یک جلسه (روز و ساعت) وارد کن.'); return; }
 
-  const conflict = checkConflict(sessions, null);
+  const conflict = checkConflict(sessions, null, termId);
   warnEl.innerHTML='';
   if(conflict){
     const cs = chosenSlot(conflict);
@@ -1318,10 +1319,16 @@ function termNameOf(termId){ const t = terms.find(t=>t.id===termId); return t ? 
 
 function renderCourseList(){
   const el = document.getElementById('courseList');
-  if(!courses.length){ el.innerHTML='<div class="empty">هنوز درسی اضافه نکردی.</div>'; return; }
-  el.innerHTML = courses.map(c=>{
+  const currentTerm = terms.find(t=>t.id===profile.currentTermId);
+  const list = currentTermCourses();
+  if(!currentTerm){
+    el.innerHTML = '<div class="empty">اول از تب «ترم‌ها» یه ترم جاری مشخص کن.</div>';
+    return;
+  }
+  if(!list.length){ el.innerHTML = `<div class="empty">هنوز درسی برای «${currentTerm.name}» اضافه نکردی.</div>`; return; }
+  el.innerHTML = list.map(c=>{
     const slot = chosenSlot(c);
-    const conflict = checkConflict(slot.sessions, c.id);
+    const conflict = checkConflict(slot.sessions, c.id, c.termId);
     const optsHtml = c.options.map((o,i)=>`
       <label class="opt-row">
         <input type="radio" name="opt_${c.id}" ${i===c.chosen?'checked':''} onchange="chooseOption(${c.id},${i})">
@@ -1342,7 +1349,7 @@ function renderCourseList(){
     <div class="item" style="display:block;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
-          <div class="name">${c.name} <span style="color:var(--muted);font-weight:400;font-size:11px;">· ${termNameOf(c.termId)}</span></div>
+          <div class="name">${c.name}</div>
           <div class="meta">${slotLabel(slot)} · ${toFaDigits(c.credit)} واحد</div>
           ${c.exam?`<div class="meta">امتحان: ${faDateTimeStr(c.exam)}</div>`:''}
           ${conflict?`<div class="meta" style="color:var(--rose);">تداخل با ${conflict.name}</div>`:''}
@@ -1360,14 +1367,14 @@ function renderCourseList(){
     </div>`;
   }).join('');
 }
-
 function activeCourses(){ return courses.filter(c=>c.status!=='dropped' && c.status!=='emergency_dropped'); }
+function currentTermCourses(){ return courses.filter(c=>c.termId===profile.currentTermId && c.status!=='dropped' && c.status!=='emergency_dropped'); }
 
 const SCHED_HOURS = Array.from({length:12}, (_,i)=>8+i);
 
 // داده‌ی برنامه هفتگی رو یک‌بار می‌سازه و هم برای جدول HTML و هم خروجی عکس استفاده می‌شه
 function buildScheduleBlocks(){
-  const list = activeCourses();
+  const list = currentTermCourses();
   const sessionsByDay = {};
   DAYS.forEach(d=>sessionsByDay[d]=[]);
   list.forEach(c=>{
@@ -1384,7 +1391,7 @@ function buildScheduleBlocks(){
     blocksByDay[d] = sessionsByDay[d].map(x=>{
       const colStart = Math.floor(x.start);
       const colSpan = Math.max(1, Math.ceil(x.end) - colStart);
-      const conflict = !!checkConflict(chosenSlot(x.course).sessions, x.course.id);
+      const conflict = !!checkConflict(chosenSlot(x.course).sessions, x.course.id, x.course.termId);
       return { name:x.course.name, time:x.time, colStart, colSpan, conflict, start:x.start, end:x.end };
     });
   });
@@ -1540,7 +1547,7 @@ function drawScheduleCanvas(hours, blocksByDay){
 
 function renderExamList(){
   const el = document.getElementById('examList');
-  const withExam = activeCourses().filter(c=>c.exam).sort((a,b)=>new Date(a.exam)-new Date(b.exam));
+  const withExam = currentTermCourses().filter(c=>c.exam).sort((a,b)=>new Date(a.exam)-new Date(b.exam));
   if(!withExam.length){ el.innerHTML='<div class="empty">امتحانی ثبت نشده.</div>'; return; }
   el.innerHTML = withExam.map(c=>{
     const days = daysUntil(c.exam);
@@ -1557,7 +1564,7 @@ window.toggleDayPref = toggleDayPref;
 
 document.getElementById('suggestBtn').addEventListener('click', ()=>{
   const resEl = document.getElementById('suggestResult');
-  const list = activeCourses().filter(c=>c.options.some(o=>o.sessions.some(s=>parseTime(s.time))));
+  const list = currentTermCourses().filter(c=>c.options.some(o=>o.sessions.some(s=>parseTime(s.time))));
   if(!list.length){ resEl.innerHTML = '<div class="alert">اول چند درس اضافه کن.</div>'; return; }
   const prefs = Array.from(dayPref);
   let best = null, bestScore = Infinity;
